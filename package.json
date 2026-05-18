@@ -1,0 +1,14 @@
+{
+  "name": "hangzhou-mahjong-web-game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node scripts/check-deploy.mjs",
+    "report:sim": "node scripts/sim-report.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs"
+  }
+}
