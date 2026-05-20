@@ -140,6 +140,11 @@ function tileClass(tile) {
   return classes.join(' ');
 }
 
+function tileAssetName(tile) {
+  if (tile.suit === 'honor') return `honor-${tile.rank}`;
+  return `${tile.suit}-${tile.rank}`;
+}
+
 function saveName() {
   storage.setItem('mahjongName', state.name.trim() || '玩家');
 }
@@ -583,14 +588,24 @@ function roomView() {
 }
 
 function playerCard(player, active, place = '') {
-  const tags = [player.role, `${player.handCount} 张`, `${player.score} 分`];
-  if (player.online !== undefined) tags.push(player.online ? '在线' : '离线');
-  if (active) tags.push('当前操作者');
+  const tags = [`${player.handCount} 张`, `${player.score} 分`];
+  if (player.role) tags.unshift(player.role);
+  if (active) tags.push('当前');
+  const rackCount = Math.min(Math.max(player.handCount || 0, 0), 14);
+  const rackClass = place === 'seat-left' || place === 'seat-right' ? 'vertical' : 'horizontal';
   return `<div class="player-card ${active ? 'active' : ''} ${place}">
-    <div class="seat-mark">${player.seatName}</div>
-    <div class="name">${player.name}</div>
-    <div class="meta">${tags.join(' · ')}</div>
-    <div class="meta">吃 ${player.chiCount}/2 · 连续财飘 ${player.caiPiao}${player.waitingCaiPiao ? ' · 等待财飘' : ''} · ${player.knocked ? '已敲响' : '未敲响'}</div>
+    <div class="player-head">
+      <div class="player-ident">
+        <div class="player-avatar">${player.name.slice(0, 1)}</div>
+        <div>
+          <div class="name">${player.name}</div>
+          <div class="meta">${tags.join(' · ')}</div>
+        </div>
+      </div>
+      <div class="seat-mark">${player.seatName}</div>
+    </div>
+    <div class="player-rack ${rackClass}">${Array.from({ length: rackCount }, () => '<span></span>').join('')}</div>
+    <div class="meta">财飘 ${player.caiPiao}${player.knocked ? ' · 敲响' : ''}</div>
     <div class="melds">${player.melds.map((meld) => `<span>${meld.tiles.map(tileText).join('')}</span>`).join('')}</div>
   </div>`;
 }
@@ -602,40 +617,90 @@ function discardRiver(game) {
   </div>`).join('');
 }
 
+function discardZone(player, extraClass = '') {
+  return `<section class="diagram-zone ${extraClass}">
+    <div class="diagram-zone-label">${player.seatName}家</div>
+    <div class="diagram-zone-tiles">${player.discards.map((tile) => `<span class="mini-tile ${tile.rank === 'bai' ? 'cai' : ''}">${tileText(tile)}</span>`).join('') || '<span class="diagram-empty">暂无弃牌</span>'}</div>
+  </section>`;
+}
+
+function meldZone(player, extraClass = '') {
+  return `<section class="diagram-meld-zone ${extraClass}">
+    <div class="diagram-zone-label">${player.seatName}家副露</div>
+    <div class="diagram-zone-tiles">${player.melds.map((meld) => `<span>${meld.tiles.map(tileText).join(' ')}</span>`).join('') || '<span class="diagram-empty">暂无副露</span>'}</div>
+  </section>`;
+}
+
 function gameView() {
   const game = state.game;
   const self = game.players[game.viewerSeat];
-  const byRelative = (offset) => game.players[(game.viewerSeat + offset) % 4];
+  const topPlayer = game.players[(game.viewerSeat + 2) % 4];
+  const leftPlayer = game.players[(game.viewerSeat + 3) % 4];
+  const rightPlayer = game.players[(game.viewerSeat + 1) % 4];
   const selected = self?.hand.find((tile) => tile.id === state.selectedTileId);
   const canSelfHu = game.actions.some((action) => action.type === 'hu');
   const currentPlayer = game.players[game.currentSeat];
   return `<section class="shell table">
     <div class="topbar">
-      <button class="ghost" id="back">首页</button>
-      <span class="badge">${state.mode === 'room' ? `房间 ${state.roomCode}` : '单机模式'}</span>
-      <span class="badge">余牌 ${game.wallCount}</span>
-    </div>
-    <div class="mahjong-table">
-      ${playerCard(byRelative(2), byRelative(2).seat === game.currentSeat, 'seat-top')}
-      ${playerCard(byRelative(3), byRelative(3).seat === game.currentSeat, 'seat-left')}
-      <div class="center-board">
-        <div class="message">${game.message}</div>
-        <div class="meta">${game.canAct ? '你可以操作' : `等待 ${currentPlayer?.name || '结算'}`}</div>
-        <div class="table-status-grid">
-          <div class="score-item"><span>当前操作者</span><strong>${currentPlayer?.name || '结算中'}</strong></div>
-          <div class="score-item"><span>庄家</span><strong>${game.players.find((player) => player.role === '庄家')?.name || '未知'}</strong></div>
-        </div>
-        ${canSelfHu ? '<div class="hu-banner">当前可自摸，留意番型和财飘</div>' : ''}
-        <div class="cai-tip">财神：白板</div>
-        <div class="rivers">${discardRiver(game)}</div>
+      <button class="ghost topbar-button" id="back">首页</button>
+      <div class="topbar-badges">
+        <span class="badge topbar-badge">${state.mode === 'room' ? `房间 ${state.roomCode}` : '单机模式'}</span>
+        <span class="badge topbar-badge">余牌 ${game.wallCount}</span>
+        <span class="badge topbar-badge">当前操作者 ${currentPlayer?.name || '结算中'}</span>
       </div>
-      ${playerCard(byRelative(1), byRelative(1).seat === game.currentSeat, 'seat-right')}
-      ${playerCard(self, self.seat === game.currentSeat, 'seat-bottom')}
     </div>
-    <div class="log panel">${game.log.map((line) => `<div>${line}</div>`).join('')}</div>
-    ${game.phase === 'settlement' ? '' : replaySummary(game.events)}
-    ${state.error ? `<div class="notice panel">${state.error}</div>` : ''}
-    ${state.notice ? `<div class="notice panel">${state.notice}</div>` : ''}
+    <div class="diagram-layout panel">
+      <div class="diagram-statusbar">
+      <div class="diagram-status-main">
+          <div class="message">${game.message}</div>
+          <div class="meta">${game.canAct ? '你可以操作' : `等待 ${currentPlayer?.name || '结算中'}`}</div>
+        </div>
+        <div class="diagram-status-metrics">
+          <span class="diagram-chip">庄家 ${game.players.find((player) => player.role === '庄家')?.name || '未知'}</span>
+          <span class="diagram-chip">财神 白板</span>
+          <span class="diagram-chip">余牌 ${game.wallCount}</span>
+        </div>
+      </div>
+      <div class="diagram-board-shell">
+        <div class="diagram-player-top">${playerCard(topPlayer, topPlayer.seat === game.currentSeat, 'seat-top')}</div>
+        <div class="diagram-player-left">${playerCard(leftPlayer, leftPlayer.seat === game.currentSeat, 'seat-left')}</div>
+        <div class="diagram-player-right">${playerCard(rightPlayer, rightPlayer.seat === game.currentSeat, 'seat-right')}</div>
+        <div class="diagram-meld-top-left">${meldZone(leftPlayer)}</div>
+        <div class="diagram-meld-top-right">${meldZone(topPlayer)}</div>
+        <div class="diagram-meld-bottom-left">${meldZone(self)}</div>
+        <div class="diagram-meld-bottom-right">${meldZone(rightPlayer)}</div>
+        <div class="diagram-board-core">
+          ${discardZone(topPlayer, 'zone-top')}
+          ${discardZone(leftPlayer, 'zone-left')}
+          <div class="diagram-center-core">
+            <div class="diagram-core-box">
+              <span class="wind north">北</span>
+              <span class="wind west">西</span>
+              <div class="diagram-core-disc">
+                <span>骰子区</span>
+                <strong>${game.players.find((player) => player.role === '庄家')?.seatName || '东'}</strong>
+              </div>
+              <span class="wind east">东</span>
+              <span class="wind south">南</span>
+            </div>
+          </div>
+          ${discardZone(rightPlayer, 'zone-right')}
+          <div class="diagram-bottom-zones">
+            ${discardZone(self, 'zone-bottom-primary')}
+            <section class="diagram-zone zone-bottom-secondary">
+              <div class="diagram-zone-label">状态</div>
+              <div class="diagram-zone-tiles zone-summary">${canSelfHu ? '<span>可胡</span>' : ''}${self.waitingCaiPiao ? '<span>财飘</span>' : ''}<span>${self.hand.length} 张</span></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mobile-table-meta stack">
+      <div class="log panel">${game.log.map((line) => `<div>${line}</div>`).join('')}</div>
+      ${game.phase === 'settlement' ? '' : replaySummary(game.events)}
+      ${state.error ? `<div class="notice panel">${state.error}</div>` : ''}
+      ${state.notice ? `<div class="notice panel">${state.notice}</div>` : ''}
+    </div>
     ${game.phase === 'settlement' ? settlementView(game) : tableActions(game, self, selected)}
   </section>`;
 }
@@ -645,19 +710,25 @@ function tableActions(game, self, selected) {
   const hasDiscard = game.actions.some((action) => action.type === 'discard');
   const canSelfHu = game.actions.some((action) => action.type === 'hu');
   const discardReady = state.confirmDiscardTileId && state.confirmDiscardTileId === state.selectedTileId;
-  return `<div class="panel">
+  return `<div class="panel action-panel">
     <div class="hand-header">
-      <div class="name">${self.name} 的手牌</div>
-      <div class="meta">${self.role} · 吃 ${self.chiCount}/2 · 连续财飘 ${self.caiPiao}${self.waitingCaiPiao ? ' · 等待财飘' : ''} · ${self.knocked ? '已敲响' : '未敲响'}</div>
+      <div>
+        <div class="name">${self.name} 的手牌</div>
+        <div class="meta">${self.role} · 财飘 ${self.caiPiao}</div>
+      </div>
+      <div class="action-summary-badges">
+        <span class="badge">手牌 ${self.hand.length} 张</span>
+        ${canSelfHu ? '<span class="badge">可胡</span>' : ''}
+      </div>
     </div>
-    ${canSelfHu ? '<div class="action-tip strong">你当前可以自摸胡，先确认番型再操作。</div>' : ''}
-    ${self.waitingCaiPiao ? '<div class="action-tip">你已进入财飘等待，下一次自己摸牌成胡会累计财飘。</div>' : ''}
+    ${canSelfHu ? '<div class="action-tip strong">你当前可以自摸胡</div>' : ''}
+    ${self.waitingCaiPiao ? '<div class="action-tip">你已进入财飘等待</div>' : ''}
     <div class="exposed-area">
       <div class="area-label">吃碰杠区</div>
       <div class="meld-row">${self.melds.length ? self.melds.map((meld) => `<span><b>${meld.type === 'chi' ? '吃' : meld.type === 'pong' ? '碰' : '杠'}</b>${meld.tiles.map(tileText).join(' ')}<small> 来自${['东','南','西','北'][meld.fromSeat] || ''}家 ${meld.sourceTile ? tileText(meld.sourceTile) : ''}</small></span>`).join('') : '<em>暂无副露</em>'}</div>
     </div>
-    <div class="draw-tip">新摸牌会用金色光圈标出。横向滑动可查看更多手牌。</div>
-    <div class="hand-scroll-wrap"><div class="hand">${self.hand.map((tile) => `<button class="tile ${tileClass(tile)} ${tile.id === self.drawnTileId ? 'drawn' : ''} ${tile.id === state.selectedTileId ? 'selected' : ''}" data-tile="${tile.id}"><span>${tileText(tile)}</span>${tile.rank === 'bai' ? '<small>财神</small>' : ''}${tile.id === self.drawnTileId ? '<i>新摸</i>' : ''}</button>`).join('')}</div></div>
+    <div class="draw-tip">横向滑动可查看更多手牌。</div>
+    <div class="hand-scroll-wrap"><div class="hand">${self.hand.map((tile) => `<button class="tile ${tileClass(tile)} ${tile.id === self.drawnTileId ? 'drawn' : ''} ${tile.id === state.selectedTileId ? 'selected' : ''}" data-tile="${tile.id}" data-asset="${tileAssetName(tile)}"><span>${tileText(tile)}</span>${tile.rank === 'bai' ? '<small>财</small>' : ''}${tile.id === self.drawnTileId ? '<i>新摸</i>' : ''}</button>`).join('')}</div></div>
     <div class="actions action-deck">
       <button id="discard" ${!hasDiscard || !selected ? 'disabled' : ''}>${discardReady ? `确认打出 ${selected ? tileText(selected) : ''}` : `准备打出${selected ? ` ${tileText(selected)}` : ''}`}</button>
       <button class="secondary" data-action="hu" ${!canSelfHu ? 'disabled' : ''}>自摸胡</button>
